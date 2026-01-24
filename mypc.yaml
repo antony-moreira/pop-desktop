@@ -1,236 +1,169 @@
 ---
-- name: Preparing Workstation
+- name: Preparing Workstation (Pop!_OS 22.04)
   hosts: localhost
   connection: local
-  tasks:
+  vars:
+    # Garante que pegamos seu usuário real mesmo com privilégios de tarefa
+    real_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+    user_home: "/home/{{ real_user }}"
 
-    - name: Installing Linux Apps
+  tasks:
+    - name: Installing Essential Apps
       become: true
       apt:
-        name: '{{ item }}'
-        install_recommends: yes
+        name: [vim, curl, wget, ncdu, tree, apt-transport-https, ca-certificates, gnupg, python3-pip, make, git, bash-completion, zsh, flameshot, fonts-hack, tilix, virtualbox, mlocate, krita, jq, mtr-tiny, software-properties-common, unzip]
         state: present
+        update_cache: yes
+
+    - name: Check if Oh-My-zsh exists
+      stat:
+        path: "{{ user_home }}/.oh-my-zsh"
+      register: ohmyzsh
+
+    - name: Installing Oh-My-zsh
+      shell: 'curl -fsL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | sh'
+      args:
+        creates: "{{ user_home }}/.oh-my-zsh"
+      when: not ohmyzsh.stat.exists
+
+    - name: Changing Default Shell to ZSH
+      become: yes
+      user: 
+        name: '{{ real_user }}'
+        shell: /bin/zsh 
+
+    - name: Configuring .zshrc
+      lineinfile:
+        path: "{{ user_home }}/.zshrc"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
       loop:
-          - vim
-          - curl
-          - wget
-          - ncdu
-          - tree
-          - apt-transport-https
-          - ca-certificates
-          - gnupg
-          - python3-pip
-          - make
-          - git
-          - bash-completion
-          - gnupg-agent
-          - zsh
-          - flameshot
-          - fonts-hack
-          - tilix
-          - virtualbox
-          - mlocate
-          - krita
-          - jq
-          - mtr
+        - { regexp: '^ZSH_THEME=', line: 'ZSH_THEME="agnoster"' }
+        - { regexp: '^plugins=', line: 'plugins=(git docker docker-compose kubectl)' }
 
-    - block:
-      - name: Verify if Oh-My-zsh is installed
-        command: test -d /home/{{ ansible_user_id }}/.oh-my-zsh
-        register: ohmyzsh
-        ignore_errors: true
-      - name: Installing Oh-My-zsh
-        shell:
-          cmd: 'curl -fsL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | bash'
-          warn: false
-        when: ohmyzsh.rc != 0
-      - name: Changing Default Shell to ZSH
-        become: yes
-        user: 
-          name: '{{ ansible_user_id }}'
-          shell: /bin/zsh 
-      - name: Changing Default ZSH Theme to Agnoster
-        lineinfile:
-          path: /home/{{ ansible_user_id }}/.zshrc
-          regexp: '^ZSH_THEME='
-          line: 'ZSH_THEME="agnoster"'
-      - name: Creating ZSH Completion folder
-        file:
-          path: /home/{{ ansible_user_id }}/.oh-my-zsh/completions
-          state: directory
-          mode: 0755
-      - name: Adding autoload to compinit
-        lineinfile:
-          path: /home/{{ ansible_user_id }}/.zshrc
-          line: 'autoload -U compinit && compinit'
-          state: present
-
-    - name: Installing AWS CLI via pip3
+    - name: Install AWS CLI V2
       become: true
-      pip:
-        name: awscli
-        executable: pip3
+      shell: |
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip -o awscliv2.zip
+        ./aws/install --update
+        rm -rf aws awscliv2.zip
+      args:
+        creates: /usr/local/bin/aws
 
-    - block:
-      - name: Install Google Key
-        become: true
-        apt_key: 
-          url: 'https://dl.google.com/linux/linux_signing_key.pub'
-          state: present
-      - name: Install Google Repository
-        become: true
-        apt_repository:
-          repo: 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main'
-          state: present
-          filename: google-chrome
-      - name: Install Google Chrome
-        become: true
-        apt:
-          name: google-chrome-stable
+    - name: Add Google Chrome Key
+      become: true
+      get_url:
+        url: https://dl.google.com/linux/linux_signing_key.pub
+        dest: /usr/share/keyrings/google-chrome.asc
+        mode: '0644'
 
-    - block:
-      - name: Install Google Cloud SDK Key
-        become: true
-        apt_key:
-          url: 'https://packages.cloud.google.com/apt/doc/apt-key.gpg'
-          state: present
-      - name: Install Google Cloud SDK Repository
-        become: true
-        apt_repository:
-          repo: 'deb [arch=amd64] https://packages.cloud.google.com/apt cloud-sdk main'
-          state: present
-          filename: google-cloud-sdk
-      - name: Install Google Cloud SDK
-        become: true
-        apt:
-          name: google-cloud-sdk
+    - name: Add Google Chrome Repo
+      become: true
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.asc] http://dl.google.com/linux/chrome/deb/ stable main"
+        state: present
+        filename: google-chrome
 
-          
-    - block:
-      - name: Install Microsoft Key
-        become: true
-        apt_key:
-          url: 'https://packages.microsoft.com/keys/microsoft.asc'
-          state: present
-      - name: Install VSCode Repository
-        become: true
-        apt_repository:
-          repo: 'deb [arch=amd64] https://packages.microsoft.com/repos/vscode stable main'
-          state: present
-          filename: vscode
-      - name: Install Visual Studio Code
-        become: true
-        apt:
-          name: code
-      - name: Install Virtual Studio Code Extensions
-        shell:
-          cmd: code --install-extension '{{ item }}' 
-        loop: 
-          - ms-python.python
-          - ms-azuretools.vscode-docker
-          - bbenoist.vagrant
-          - hashicorp.terraform
-          - gruntfuggly.todo-tree
-          - njpwerner.autodocstring
-          - eamodio.gitlens
+    - name: Install Google Chrome
+      become: true
+      apt:
+        name: google-chrome-stable
 
-    - block: 
-      - name: Install Docker Key
-        become: true
-        apt_key:
-          url: 'https://download.docker.com/linux/ubuntu/gpg'
-          state: present
-      - name: Install Docker Repository
-        become: true
-        apt_repository:
-          repo: 'deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable'
-          state: present
-          filename: docker-ce
-      - name: Install Docker
-        become: true
-        apt:
-          name: docker-ce
-      - name: Adding existing user to group Docker
-        become: yes
-        user: 
-          name: '{{ ansible_user_id }}'
-          groups: docker 
-          append: yes
-      - name: Install Docker-Compose
-        become: true
-        get_url:
-          url: 'https://github.com/docker/compose/releases/download/1.26.2/docker-compose-Linux-x86_64'
-          dest: '/usr/local/bin/docker-compose'
-          mode: 755
-      - name: Install Docker Machine Bash Completion
-        become: true
-        get_url:
-          url: 'https://raw.githubusercontent.com/docker/machine/v0.16.0/contrib/completion/bash/docker-machine.bash'
-          dest: '/etc/bash_completion.d/docker-machine'
-      - name: Install Docker-Compose Bash Completion
-        become: true
-        get_url:
-          url: 'https://raw.githubusercontent.com/docker/compose/1.26.2/contrib/completion/bash/docker-compose'
-          dest: '/etc/bash_completion.d/docker-compose'
-      - name: Install Docker-Compose and Docker Machine Zsh Completion
-        lineinfile:
-          path: /home/{{ ansible_user_id }}/.zshrc
-          regexp: '^plugins='
-          line: 'plugins=(git docker docker-compose)'
-        
-    - block:
-      - name: Installing Kubectl 1.22.0
-        become: true
-        get_url:    
-          url: 'https://dl.k8s.io/release/v1.22.0/bin/linux/amd64/kubectl'
-          dest: /usr/local/bin/kubectl
-          mode: 755
-      - name: Downloading Kubectx and Kubens 
-        become: true
-        git:
-          repo: 'https://github.com/ahmetb/kubectx'
-          dest: /opt/kubectx 
-      - name: Creating Symlink to kubectx and kubens 
-        become: true
-        file:
-          src: '/opt/kubectx/{{ item }}'
-          dest: '/usr/local/bin/{{ item }}'
-          state: link
-        with_items:
-          - kubectx
-          - kubens  
-      - name: Creating ZSH Completion  
-        file:
-          src: '/opt/kubectx/completion/{{ item }}'
-          dest: '/home/{{ ansible_user_id }}/.oh-my-zsh/completions/_{{ item }}'
-          state: link
-        with_items:
-          - kubectx.zsh
-          - kubens.zsh 
-          
-    - block:
-      - name: Install obsproject Ubuntu Repo
-        become: true
-        apt_repository:
-          repo: 'ppa:obsproject/obs-studio'
-      - name: Install obs Studio
-        become: true
-        apt:
-          name: obs-studio
+    - name: Add VS Code Key
+      become: true
+      get_url:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        dest: /usr/share/keyrings/microsoft.asc
 
-    - block: 
-      - name: Install Brave Key
-        become: true
-        apt_key:
-          url: 'https://brave-browser-apt-release.s3.brave.com/brave-core.asc'
-          state: present
-      - name: Install Brave Repository
-        become: true
-        apt_repository:
-          repo: 'deb [arch=amd64] https://brave-browser-apt-release.s3.brave.com/ stable main'
-          state: present
-          filename: brave
-      - name: Install Brave Browser
-        become: true
-        apt:
-          name: brave-browser
+    - name: Add VS Code Repo
+      become: true
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/repos/vscode stable main"
+        state: present
+        filename: vscode
+
+    - name: Install VS Code
+      become: true
+      apt:
+        name: code
+
+    - name: Install VS Code Extensions
+      shell: code --install-extension {{ item }} --force
+      loop: 
+        - ms-python.python
+        - ms-azuretools.vscode-docker
+        - hashicorp.terraform
+        - gruntfuggly.todo-tree
+        - eamodio.gitlens
+      register: vscode_ext
+      changed_when: "'already installed' not in vscode_ext.stdout"
+
+    - name: Add Docker Key
+      become: true
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /usr/share/keyrings/docker.asc
+
+    - name: Add Docker Repo
+      become: true
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable"
+        state: present
+        filename: docker
+
+    - name: Install Docker Engine
+      become: true
+      apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+
+    - name: Add user to Docker group
+      become: true
+      user: 
+        name: '{{ real_user }}'
+        groups: docker 
+        append: yes
+
+    - name: Install Kubectl
+      become: true
+      get_url:    
+        url: "https://dl.k8s.io/release/{{ lookup('url', 'https://dl.k8s.io/release/stable.txt') }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: 0755
+
+    - name: Install Kubectx & Kubens
+      become: true
+      git:
+        repo: 'https://github.com/ahmetb/kubectx'
+        dest: /opt/kubectx 
+
+    - name: Symlink Kubectx & Kubens
+      become: true
+      file:
+        src: "/opt/kubectx/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        state: link
+      loop: [kubectx, kubens]
+
+    - name: Add Brave Key
+      become: true
+      get_url:
+        url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+        dest: /usr/share/keyrings/brave-browser-archive-keyring.gpg
+
+    - name: Add Brave Repo
+      become: true
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg arch=amd64] https://brave-browser-apt-release.s3.brave.com/ stable main"
+        state: present
+        filename: brave-browser
+
+    - name: Install Brave
+      become: true
+      apt:
+        name: brave-browser
+
+    - name: Install OBS Studio PPA
+      become: true
+      apt_repository:
+        repo: 'ppa:obsproject/obs-studio'

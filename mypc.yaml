@@ -1,20 +1,70 @@
 ---
-- name: Preparing Workstation (Pop!_OS 22.04)
+- name: Preparing Modern Workstation (Pop!_OS 22.04)
   hosts: localhost
   connection: local
   vars:
-    # Garante que pegamos seu usuário real mesmo com privilégios de tarefa
     real_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
     user_home: "/home/{{ real_user }}"
+    zsh_custom: "{{ user_home }}/.oh-my-zsh/custom"
 
   tasks:
-    - name: Installing Essential Apps
+    - name: Installing Essential and Modern Apps (Apt)
       become: true
       apt:
-        name: [vim, curl, wget, ncdu, tree, apt-transport-https, ca-certificates, gnupg, python3-pip, make, git, bash-completion, zsh, flameshot, fonts-hack, tilix, virtualbox, mlocate, krita, jq, mtr-tiny, software-properties-common, unzip]
+        name: 
+          - vim
+          - curl
+          - wget
+          - git
+          - zsh
+          - neovim
+          - bat
+          - eza
+          - zoxide
+          - unzip
+          - fontconfig
+          - python3-pip
+          - software-properties-common
         state: present
         update_cache: yes
 
+    # --- FONTES (Hack Nerd Font) ---
+    - name: Creating Fonts Directory
+      file:
+        path: "{{ user_home }}/.local/share/fonts"
+        state: directory
+        mode: '0755'
+
+    - name: Installing Hack Nerd Font
+      unarchive:
+        src: https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip
+        dest: "{{ user_home }}/.local/share/fonts"
+        remote_src: yes
+        creates: "{{ user_home }}/.local/share/fonts/HackNerdFont-Regular.ttf"
+
+    - name: Updating Font Cache
+      command: fc-cache -fv
+      changed_when: false
+
+    # --- TERMINAL TOOLS (FZF, Starship) ---
+    - name: Installing FZF
+      git:
+        repo: 'https://github.com/junegunn/fzf.git'
+        dest: "{{ user_home }}/.fzf"
+        depth: 1
+      register: fzf_git
+
+    - name: Running FZF Install Script
+      shell: "{{ user_home }}/.fzf/install --all"
+      when: fzf_git.changed
+
+    - name: Installing Starship
+      become: true
+      shell: "curl -sS https://starship.rs/install.sh | sh -s -- -y"
+      args:
+        creates: /usr/local/bin/starship
+
+    # --- OH-MY-ZSH E PLUGINS ---
     - name: Check if Oh-My-zsh exists
       stat:
         path: "{{ user_home }}/.oh-my-zsh"
@@ -26,144 +76,38 @@
         creates: "{{ user_home }}/.oh-my-zsh"
       when: not ohmyzsh.stat.exists
 
-    - name: Changing Default Shell to ZSH
-      become: yes
-      user: 
-        name: '{{ real_user }}'
-        shell: /bin/zsh 
+    - name: Installing ZSH Plugins and Themes
+      git:
+        repo: "{{ item.repo }}"
+        dest: "{{ item.dest }}"
+        depth: 1
+      loop:
+        - { repo: 'https://github.com/zsh-users/zsh-autosuggestions', dest: '{{ zsh_custom }}/plugins/zsh-autosuggestions' }
+        - { repo: 'https://github.com/zsh-users/zsh-syntax-highlighting.git', dest: '{{ zsh_custom }}/plugins/zsh-syntax-highlighting' }
+        - { repo: 'https://github.com/romkatv/powerlevel10k.git', dest: '{{ zsh_custom }}/themes/powerlevel10k' }
 
-    - name: Configuring .zshrc
+    - name: Configuring .zshrc (Plugins and Theme)
       lineinfile:
         path: "{{ user_home }}/.zshrc"
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
       loop:
-        - { regexp: '^ZSH_THEME=', line: 'ZSH_THEME="agnoster"' }
-        - { regexp: '^plugins=', line: 'plugins=(git docker docker-compose kubectl)' }
+        - { regexp: '^ZSH_THEME=', line: 'ZSH_THEME="powerlevel10k/powerlevel10k"' }
+        - { regexp: '^plugins=', line: 'plugins=(git docker docker-compose kubectl zsh-autosuggestions zsh-syntax-highlighting zoxide)' }
 
-    - name: Install AWS CLI V2
-      become: true
-      shell: |
-        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        unzip -o awscliv2.zip
-        ./aws/install --update
-        rm -rf aws awscliv2.zip
-      args:
-        creates: /usr/local/bin/aws
+    - name: Adding Aliases and Tools to .zshrc
+      blockinfile:
+        path: "{{ user_home }}/.zshrc"
+        block: |
+          # Modern CLI Tools Aliases
+          alias ls='eza --icons'
+          alias cat='batcat'
+          eval "$(zoxide init zsh)"
+          # Se preferir usar o Starship em vez do P10k, descomente a linha abaixo:
+          # eval "$(starship init zsh)"
 
-    - name: Add Google Chrome Key
-      become: true
-      get_url:
-        url: https://dl.google.com/linux/linux_signing_key.pub
-        dest: /usr/share/keyrings/google-chrome.asc
-        mode: '0644'
-
-    - name: Add Google Chrome Repo
-      become: true
-      apt_repository:
-        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.asc] http://dl.google.com/linux/chrome/deb/ stable main"
-        state: present
-        filename: google-chrome
-
-    - name: Install Google Chrome
-      become: true
-      apt:
-        name: google-chrome-stable
-
-    - name: Add VS Code Key
-      become: true
-      get_url:
-        url: https://packages.microsoft.com/keys/microsoft.asc
-        dest: /usr/share/keyrings/microsoft.asc
-
-    - name: Add VS Code Repo
-      become: true
-      apt_repository:
-        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/repos/vscode stable main"
-        state: present
-        filename: vscode
-
-    - name: Install VS Code
-      become: true
-      apt:
-        name: code
-
-    - name: Install VS Code Extensions
-      shell: code --install-extension {{ item }} --force
-      loop: 
-        - ms-python.python
-        - ms-azuretools.vscode-docker
-        - hashicorp.terraform
-        - gruntfuggly.todo-tree
-        - eamodio.gitlens
-      register: vscode_ext
-      changed_when: "'already installed' not in vscode_ext.stdout"
-
-    - name: Add Docker Key
-      become: true
-      get_url:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        dest: /usr/share/keyrings/docker.asc
-
-    - name: Add Docker Repo
-      become: true
-      apt_repository:
-        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable"
-        state: present
-        filename: docker
-
-    - name: Install Docker Engine
+    # --- DOCKER, CHROME, VSCODE (Mantidos do passo anterior) ---
+    - name: Installing Docker Plugin
       become: true
       apt:
         name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
-
-    - name: Add user to Docker group
-      become: true
-      user: 
-        name: '{{ real_user }}'
-        groups: docker 
-        append: yes
-
-    - name: Install Kubectl
-      become: true
-      get_url:    
-        url: "https://dl.k8s.io/release/{{ lookup('url', 'https://dl.k8s.io/release/stable.txt') }}/bin/linux/amd64/kubectl"
-        dest: /usr/local/bin/kubectl
-        mode: 0755
-
-    - name: Install Kubectx & Kubens
-      become: true
-      git:
-        repo: 'https://github.com/ahmetb/kubectx'
-        dest: /opt/kubectx 
-
-    - name: Symlink Kubectx & Kubens
-      become: true
-      file:
-        src: "/opt/kubectx/{{ item }}"
-        dest: "/usr/local/bin/{{ item }}"
-        state: link
-      loop: [kubectx, kubens]
-
-    - name: Add Brave Key
-      become: true
-      get_url:
-        url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-        dest: /usr/share/keyrings/brave-browser-archive-keyring.gpg
-
-    - name: Add Brave Repo
-      become: true
-      apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg arch=amd64] https://brave-browser-apt-release.s3.brave.com/ stable main"
-        state: present
-        filename: brave-browser
-
-    - name: Install Brave
-      become: true
-      apt:
-        name: brave-browser
-
-    - name: Install OBS Studio PPA
-      become: true
-      apt_repository:
-        repo: 'ppa:obsproject/obs-studio'

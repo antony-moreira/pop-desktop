@@ -15,11 +15,6 @@
         real_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
         user_home: "{{ '/home/' + ansible_env.SUDO_USER if ansible_env.SUDO_USER is defined else ansible_env.HOME }}"
 
-    # --- DEBUG (opcional, pode remover depois) ---
-    - name: Debug user
-      debug:
-        msg: "User: {{ real_user }} | Home: {{ user_home }}"
-
     # --- BASE ---
     - name: Install essential packages
       apt:
@@ -60,17 +55,24 @@
         remote_src: yes
         mode: '0755'
 
-    - name: Install zoxide (binary)
+    # --- ZOXIDE (CORRIGIDO) ---
+    - name: Download zoxide
       get_url:
-        url: https://github.com/ajeetdsouza/zoxide/releases/latest/download/zoxide-x86_64-unknown-linux-musl.tar.gz
+        url: https://github.com/ajeetdsouza/zoxide/releases/latest/download/zoxide-x86_64-unknown-linux-gnu.tar.gz
         dest: /tmp/zoxide.tar.gz
 
     - name: Extract zoxide
       unarchive:
         src: /tmp/zoxide.tar.gz
-        dest: /usr/local/bin/
+        dest: /tmp/zoxide
         remote_src: yes
+
+    - name: Install zoxide binary
+      copy:
+        src: /tmp/zoxide/zoxide
+        dest: /usr/local/bin/zoxide
         mode: '0755'
+        remote_src: yes
 
     # --- FZF ---
     - name: Install FZF

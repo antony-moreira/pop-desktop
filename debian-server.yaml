@@ -1,0 +1,128 @@
+---
+- name: Preparing Debian Server (Modern CLI)
+  hosts: localhost
+  connection: local
+  become: true
+
+  vars:
+    real_user: "{{ lookup('env','SUDO_USER') or ansible_user_id }}"
+    user_home: "/home/{{ real_user }}"
+    zsh_custom: "{{ user_home }}/.oh-my-zsh/custom"
+
+  tasks:
+
+    # --- BASE ---
+    - name: Install essential packages
+      apt:
+        name:
+          - vim
+          - curl
+          - wget
+          - git
+          - zsh
+          - neovim
+          - bat
+          - unzip
+          - fontconfig
+          - python3-pip
+          - software-properties-common
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    # --- BAT FIX ---
+    - name: Create bat symlink
+      file:
+        src: /usr/bin/batcat
+        dest: /usr/local/bin/bat
+        state: link
+
+    # --- EZA ---
+    - name: Download eza
+      get_url:
+        url: https://github.com/eza-community/eza/releases/latest/download/eza_x86_64-unknown-linux-gnu.tar.gz
+        dest: /tmp/eza.tar.gz
+
+    - name: Extract eza
+      unarchive:
+        src: /tmp/eza.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+        mode: '0755'
+
+    # --- ZOXIDE ---
+    - name: Install zoxide
+      shell: "curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash"
+      args:
+        creates: /usr/local/bin/zoxide
+
+    # --- FZF ---
+    - name: Install FZF
+      git:
+        repo: 'https://github.com/junegunn/fzf.git'
+        dest: "{{ user_home }}/.fzf"
+        depth: 1
+      become: false
+      register: fzf_git
+
+    - name: Run FZF install
+      shell: "{{ user_home }}/.fzf/install --all"
+      args:
+        executable: /bin/bash
+      become: false
+      when: fzf_git.changed
+
+    # --- STARSHIP (removido propositalmente) ---
+
+    # --- OH MY ZSH ---
+    - name: Check Oh My Zsh
+      stat:
+        path: "{{ user_home }}/.oh-my-zsh"
+      register: ohmyzsh
+      become: false
+
+    - name: Install Oh My Zsh
+      shell: >
+        RUNZSH=no CHSH=no KEEP_ZSHRC=yes
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+      args:
+        creates: "{{ user_home }}/.oh-my-zsh"
+      become: false
+      when: not ohmyzsh.stat.exists
+
+    # --- POWERLEVEL10K ---
+    - name: Install Powerlevel10k theme
+      git:
+        repo: https://github.com/romkatv/powerlevel10k.git
+        dest: "{{ zsh_custom }}/themes/powerlevel10k"
+        depth: 1
+      become: false
+
+    # --- PLUGINS ---
+    - name: Install ZSH plugins
+      git:
+        repo: "{{ item.repo }}"
+        dest: "{{ item.dest }}"
+        depth: 1
+      loop:
+        - { repo: 'https://github.com/zsh-users/zsh-autosuggestions', dest: '{{ zsh_custom }}/plugins/zsh-autosuggestions' }
+        - { repo: 'https://github.com/zsh-users/zsh-syntax-highlighting.git', dest: '{{ zsh_custom }}/plugins/zsh-syntax-highlighting' }
+      become: false
+
+    # --- DEPLOY ZSHRC ---
+    - name: Deploy .zshrc
+      copy:
+        src: zsh/.zshrc
+        dest: "{{ user_home }}/.zshrc"
+        owner: "{{ real_user }}"
+        group: "{{ real_user }}"
+        mode: '0644'
+        backup: yes
+
+    # --- DEFAULT SHELL ---
+    - name: Set ZSH as default shell
+      user:
+        name: "{{ real_user }}"
+        shell: /usr/bin/zsh

@@ -25,7 +25,6 @@
           - unzip
           - fontconfig
           - python3-pip
-          - software-properties-common
           - ca-certificates
           - gnupg
           - lsb-release

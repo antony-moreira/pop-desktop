@@ -55,24 +55,12 @@
         remote_src: yes
         mode: '0755'
 
-    # --- ZOXIDE (CORRIGIDO) ---
-    - name: Download zoxide
-      get_url:
-        url: https://github.com/ajeetdsouza/zoxide/releases/latest/download/zoxide-x86_64-unknown-linux-gnu.tar.gz
-        dest: /tmp/zoxide.tar.gz
-
-    - name: Extract zoxide
-      unarchive:
-        src: /tmp/zoxide.tar.gz
-        dest: /tmp/zoxide
-        remote_src: yes
-
-    - name: Install zoxide binary
-      copy:
-        src: /tmp/zoxide/zoxide
-        dest: /usr/local/bin/zoxide
-        mode: '0755'
-        remote_src: yes
+    # --- ZOXIDE (PROVA DE FALHA) ---
+    - name: Install zoxide via official script
+      shell: |
+        curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash -s -- --bin-dir /usr/local/bin
+      args:
+        creates: /usr/local/bin/zoxide
 
     # --- FZF ---
     - name: Install FZF

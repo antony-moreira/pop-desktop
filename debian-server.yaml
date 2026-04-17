@@ -5,11 +5,20 @@
   become: true
 
   vars:
-    real_user: "{{ lookup('env','SUDO_USER') or ansible_user_id }}"
-    user_home: "/home/{{ real_user }}"
     zsh_custom: "{{ user_home }}/.oh-my-zsh/custom"
 
   tasks:
+
+    # --- DETECT USER ---
+    - name: Detect real user
+      set_fact:
+        real_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+        user_home: "{{ '/home/' + ansible_env.SUDO_USER if ansible_env.SUDO_USER is defined else ansible_env.HOME }}"
+
+    # --- DEBUG (opcional, pode remover depois) ---
+    - name: Debug user
+      debug:
+        msg: "User: {{ real_user }} | Home: {{ user_home }}"
 
     # --- BASE ---
     - name: Install essential packages
@@ -63,24 +72,23 @@
         repo: 'https://github.com/junegunn/fzf.git'
         dest: "{{ user_home }}/.fzf"
         depth: 1
-      become: false
+      become: true
+      become_user: "{{ real_user }}"
       register: fzf_git
 
     - name: Run FZF install
       shell: "{{ user_home }}/.fzf/install --all"
       args:
         executable: /bin/bash
-      become: false
+      become: true
+      become_user: "{{ real_user }}"
       when: fzf_git.changed
-
-    # --- STARSHIP (removido propositalmente) ---
 
     # --- OH MY ZSH ---
     - name: Check Oh My Zsh
       stat:
         path: "{{ user_home }}/.oh-my-zsh"
       register: ohmyzsh
-      become: false
 
     - name: Install Oh My Zsh
       shell: >
@@ -88,7 +96,8 @@
         sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
       args:
         creates: "{{ user_home }}/.oh-my-zsh"
-      become: false
+      become: true
+      become_user: "{{ real_user }}"
       when: not ohmyzsh.stat.exists
 
     # --- POWERLEVEL10K ---
@@ -97,7 +106,8 @@
         repo: https://github.com/romkatv/powerlevel10k.git
         dest: "{{ zsh_custom }}/themes/powerlevel10k"
         depth: 1
-      become: false
+      become: true
+      become_user: "{{ real_user }}"
 
     # --- PLUGINS ---
     - name: Install ZSH plugins
@@ -108,12 +118,13 @@
       loop:
         - { repo: 'https://github.com/zsh-users/zsh-autosuggestions', dest: '{{ zsh_custom }}/plugins/zsh-autosuggestions' }
         - { repo: 'https://github.com/zsh-users/zsh-syntax-highlighting.git', dest: '{{ zsh_custom }}/plugins/zsh-syntax-highlighting' }
-      become: false
+      become: true
+      become_user: "{{ real_user }}"
 
     # --- DEPLOY ZSHRC ---
     - name: Deploy .zshrc
       copy:
-        src: zsh/.zshrc
+        src: "{{ playbook_dir }}/zsh/.zshrc"
         dest: "{{ user_home }}/.zshrc"
         owner: "{{ real_user }}"
         group: "{{ real_user }}"
